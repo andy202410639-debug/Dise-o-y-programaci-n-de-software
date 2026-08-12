@@ -1,0 +1,333 @@
+#include <iostream>
+#include <limits>
+
+using namespace std;
+
+enum class ECUState { // ECU STATES
+    INIT,
+    SELF_TEST,
+    OPERATIONAL,
+    DEGRADED,
+    SAFE_STATE,
+    SHUTDOWN
+};
+
+ECUState state = ECUState::INIT;
+
+double speed = 0.0;  // VEHICLE SIGNALS
+int rpm = 0;
+double temperature = 25.0;
+double throttle = 0.0;
+double voltage = 13.8;
+
+bool speedValid;  // Signal validation results
+bool rpmValid;
+bool temperatureValid;
+bool throttleValid;
+bool voltageValid;
+
+string stateName(ECUState s) // STATE NAME
+{
+    switch (s) {
+        case ECUState::INIT: return "INIT";
+        case ECUState::SELF_TEST: return "SELF_TEST";
+        case ECUState::OPERATIONAL: return "OPERATIONAL";
+        case ECUState::DEGRADED: return "DEGRADED";
+        case ECUState::SAFE_STATE: return "SAFE_STATE";
+        case ECUState::SHUTDOWN: return "SHUTDOWN";
+    }
+
+    return "UNKNOWN";
+}
+
+bool validateSpeed(double value)  // GATEWAY ECU - SIGNAL VALIDATION
+{
+    return value >= 0.0 && value <= 250.0; // Validate speed: 0 to 250 km/h
+}
+
+bool validateRPM(int value)
+{
+    return value >= 0 && value <= 8000; // Validate RPM: 0 to 8000 rpm
+}
+
+bool validateTemperature(double value)
+{
+    return value >= -40.0 && value <= 150.0; // Validate temperature: -40 to 150 C
+}
+
+bool validateThrottle(double value)
+{
+    return value >= 0.0 && value <= 100.0; // Validate throttle: 0 to 100 %
+}
+
+bool validateVoltage(double value)
+{
+    return value >= 9.0 && value <= 16.0; //Validate voltage 9 to 16V
+}
+
+void clearInput()  // INPUT
+{
+    cin.clear();
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+}
+
+void readSignals()
+{
+    cout << "\nSIGNAL INPUT\n";
+    cout << "Enter speed km/h: ";
+    cin >> speed;
+    cout << "Enter RPM: ";
+    cin >> rpm;
+    cout << "Enter temperature C: ";
+    cin >> temperature;
+    cout << "Enter throttle %: ";
+    cin >> throttle;
+    cout << "Enter voltage V: ";
+    cin >> voltage;
+
+    if (cin.fail()) {
+        cout << "Invalid input.\n";
+        clearInput();
+        return;
+    }
+    cout << "...\n";
+}
+
+void gatewayValidation() // GATEWAY ECU
+{
+    speedValid = validateSpeed(speed);
+    rpmValid = validateRPM(rpm);
+    temperatureValid = validateTemperature(temperature);
+    throttleValid = validateThrottle(throttle);
+    voltageValid = validateVoltage(voltage);
+}
+
+void controlECU()  // CONTROL ECU
+{
+    bool criticalCondition = false;
+    bool warningCondition = false;
+
+    if (temperatureValid) { // Critical and warning temperature conditions
+        if (temperature >= 110.0)
+            criticalCondition = true;
+        else if (temperature >= 100.0)
+            warningCondition = true;
+    }
+
+    if (rpmValid) {   // Critical and warning RPM conditions
+        if (rpm > 7000)
+            criticalCondition = true;
+        else if (rpm > 6000)
+            warningCondition = true;
+    }
+
+    if (voltageValid) {  // Critical and warning voltage conditions
+        if (voltage < 11.0)
+            criticalCondition = true;
+        else if (voltage < 12.0)
+            warningCondition = true;
+    }
+
+    bool inconsistentMotion =     // Combined signal checks
+        speedValid && rpmValid &&
+        speed > 0.0 && rpm == 0;
+
+    bool inconsistentThrottle =
+        throttleValid && rpmValid &&
+        throttle > 80.0 && rpm < 500;
+
+    if (inconsistentMotion || inconsistentThrottle)
+        warningCondition = true;
+
+    if (criticalCondition)   // priority
+        state = ECUState::SAFE_STATE;
+    else if (warningCondition ||
+             !speedValid || !rpmValid ||
+             !temperatureValid ||
+             !throttleValid || !voltageValid)
+        state = ECUState::DEGRADED;
+    else
+        state = ECUState::OPERATIONAL;
+}
+
+void showDiagnostics() // DIAGNOSTICS
+{
+    cout << "\nDIAGNOSTICS\n";
+    bool found = false;
+    if (!speedValid) {
+        cout << "Invalid speed signal\n";
+        found = true;
+    }
+    if (!rpmValid) {
+        cout << "Invalid RPM signal\n";
+        found = true;
+    }
+    if (!temperatureValid) {
+        cout << "Invalid temperature signal\n";
+        found = true;
+    }
+    if (!throttleValid) {
+        cout << "Invalid throttle signal\n";
+        found = true;
+    }
+    if (!voltageValid) {
+        cout << "Invalid voltage signal\n";
+        found = true;
+    }
+    if (temperatureValid) {
+        if (temperature >= 110.0) {
+            cout << "CRITICAL: High temperature\n";
+            found = true;
+        }
+        else if (temperature >= 100.0) {
+            cout << "WARNING: High temperature\n";
+            found = true;
+        }
+    }
+    if (rpmValid) {
+        if (rpm > 7000) {
+            cout << "CRITICAL: RPM too high\n";
+            found = true;
+        }
+        else if (rpm > 6000) {
+            cout << "WARNING: RPM high\n";
+            found = true;
+        }
+    }
+    if (voltageValid) {
+        if (voltage < 11.0) {
+            cout << "CRITICAL: Low voltage\n";
+            found = true;
+        }
+        else if (voltage < 12.0) {
+            cout << "WARNING: Low voltage\n";
+            found = true;
+        }
+    }
+    if (speedValid && rpmValid &&
+        speed > 0.0 && rpm == 0) {
+        cout << "WARNING: Inconsistent motion\n";
+        found = true;
+    }
+    if (throttleValid && rpmValid &&
+        throttle > 80.0 && rpm < 500) {
+        cout << "WARNING: Inconsistent throttle\n";
+        found = true;
+    }
+    if (!found)
+        cout << "No abnormal conditions detected.\n";
+
+    cout << "   \n";
+}
+
+
+void showStatus() // STATUS
+{
+    cout << "\n LATFORM STATUS \n";
+
+    cout << "Control ECU State: "
+         << stateName(state) << "\n\n";
+    cout << "Speed: " << speed << " km/h - "
+         << (speedValid ? "VALID" : "INVALID") << '\n';
+    cout << "RPM: " << rpm << " rpm - "
+         << (rpmValid ? "VALID" : "INVALID") << '\n';
+    cout << "Temperature: " << temperature << " C - "
+         << (temperatureValid ? "VALID" : "INVALID") << '\n';
+    cout << "Throttle: " << throttle << " % - "
+         << (throttleValid ? "VALID" : "INVALID") << '\n';
+    cout << "Voltage: " << voltage << " V - "
+         << (voltageValid ? "VALID" : "INVALID") << '\n';
+    showDiagnostics();
+    cout << "\nDecision: ";
+    if (state == ECUState::OPERATIONAL)
+        cout << "Normal operation\n";
+    else if (state == ECUState::DEGRADED)
+        cout << "Degraded operation\n";
+    else if (state == ECUState::SAFE_STATE)
+        cout << "System in SAFE_STATE\n";
+    else
+        cout << "System not operational\n";
+
+    cout << "  \n";
+}
+
+void resetSystem() // RESET
+{
+    speed = 0.0;
+    rpm = 0;
+    temperature = 25.0;
+    throttle = 0.0;
+    voltage = 13.8;
+
+    state = ECUState::INIT;
+
+    cout << "\nSystem reset.\n";
+}
+
+
+bool selfTest()  // SELF TEST
+{
+    cout << "\nPerforming SELF_TEST...\n";
+    cout << "SELF_TEST PASSED.\n";
+    return true;
+}
+
+
+int main()
+{
+    int option;
+
+    cout << "\n";
+    cout << "        ECU GATEWAY SIMULATOR v0.1\n";
+    cout << "\n";
+
+    state = ECUState::INIT;  // System initialization
+    state = ECUState::SELF_TEST;     // Self-test before operation
+
+    if (!selfTest()) {
+        state = ECUState::SHUTDOWN;
+        return 1;
+    }
+    while (state != ECUState::SHUTDOWN) {
+
+        cout << "\n MENU \n";
+        cout << "1.Enter signal values\n";
+        cout << "2.Show system status\n";
+        cout << "3.Reset system\n";
+        cout << "4.Exit\n";
+        cout << "Select an option: ";
+        cin >> option;
+
+        if (cin.fail()) {
+            cout << "Invalid option.\n";
+            clearInput();
+            continue;
+        }
+        switch (option) {
+
+            case 1:     // Input -> Gateway -> Control ECU
+                readSignals();
+                gatewayValidation();
+                controlECU();
+                cout << "Signals processed.\n";
+                break;
+            case 2:
+                showStatus();
+                break;
+            case 3:
+                resetSystem();
+                state = ECUState::SELF_TEST;
+                selfTest();
+                break;
+            case 4:
+                state = ECUState::SHUTDOWN;
+                cout << "\nSystem shutting down...\n";
+                break;
+            default:
+                cout << "Invalid option. Select 1-4.\n";
+        }
+    }
+    cout << "ECU simulator finished.\n";
+
+    return 0;
+}
